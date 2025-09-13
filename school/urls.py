@@ -31,5 +31,5 @@ urlpatterns = [
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/", MeView.as_view(), name="me"),
     path("api/health/", HealthView.as_view(), name="health"),
-    path("api/", include(router.urls)),
+    path("api/", include("enrollments.urls")),
 ]
