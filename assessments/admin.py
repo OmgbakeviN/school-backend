@@ -8,11 +8,19 @@ class AssessmentTypeAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("code", "name")
 
+class ScoreInline(admin.TabularInline):
+    model = Score
+    extra = 0
+    fields = ("enrollment_subject", "value")
+    show_change_link = True
+
 @admin.register(Assessment)
 class AssessmentAdmin(admin.ModelAdmin):
     list_display = ("term", "class_subject", "atype")
     list_filter = ("term__year", "term__index", "class_subject__classroom__level", "class_subject__classroom__stream", "atype__code")
     search_fields = ("class_subject__classroom__name", "class_subject__subject__name", "atype__code")
+    inlines = [ScoreInline]
+
 
 @admin.register(Score)
 class ScoreAdmin(admin.ModelAdmin):
