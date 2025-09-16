@@ -36,3 +36,24 @@ class EnrollmentSubjectDetailSerializer(serializers.ModelSerializer):
 
     def get_effective_coefficient(self, obj):
         return obj.coef_override if obj.coef_override is not None else obj.class_subject.coefficient
+
+class StudentMiniSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    class Meta:
+        model = Student
+        fields = ["id","matricule","last_name","first_name","sex","full_name"]
+    def get_full_name(self, obj):
+        return f"{obj.last_name} {obj.first_name}"
+
+class EnrollmentDetailSerializer(serializers.ModelSerializer):
+    student = StudentMiniSerializer(read_only=True)
+    classroom_name = serializers.CharField(source="classroom.name", read_only=True)
+    level = serializers.CharField(source="classroom.level.code", read_only=True)
+    year = serializers.CharField(source="classroom.year.name", read_only=True)
+
+    class Meta:
+        model = Enrollment
+        fields = [
+            "id","student","classroom","classroom_name","level","year",
+            "active","date_enrolled"
+        ]

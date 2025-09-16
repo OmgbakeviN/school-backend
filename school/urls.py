@@ -32,4 +32,8 @@ urlpatterns = [
     path("api/me/", MeView.as_view(), name="me"),
     path("api/health/", HealthView.as_view(), name="health"),
     path("api/", include("enrollments.urls")),
+    path("api/", include("assessments.urls")),
+    path("api/", include("reports.urls")),
+    path("api/", include("core.urls")),
+    path("api/", include("subjects.urls")),
 ]
