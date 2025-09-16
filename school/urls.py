@@ -38,4 +38,5 @@ urlpatterns = [
     path("api/", include("subjects.urls")),
     path("api/", include("portals.urls")),
     path("api/", include("analytics.urls")),
+    path("", include("reports.urls")),
 ]
