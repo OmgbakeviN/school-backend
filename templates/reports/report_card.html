@@ -31,6 +31,8 @@
   <div>
     <div class="line"><b>Student:</b> {{ p.student.name }} ({{ p.student.matricule }}) — {{ p.student.sex }}</div>
     <div class="line"><b>Class:</b> {{ p.classroom.name }} — <b>Level:</b> {{ p.classroom.level }}</div>
+    <div class="line"><b>Position:</b> {{ p.class_stats.rank }} / {{ p.class_stats.count }}
+      — <b>Class Avg:</b> {{ p.class_stats.class_avg }}</div> <!-- AJOUT -->
   </div>
 
   <div class="qrbox">
