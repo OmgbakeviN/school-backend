@@ -2,6 +2,7 @@ import io, zipfile
 from django.http import HttpResponse, Http404
 from django.urls import reverse
 from django.views.generic import TemplateView
+from django.template.loader import render_to_string
 
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -12,7 +13,7 @@ from core.models import Term
 from enrollments.models import Enrollment
 from subjects.models import ClassSubject
 from .models import ReportToken
-from .services import compute_student_term, build_pdf_html, render_pdf_from_html, sha1_bytes
+from .services import compute_student_term, build_pdf_html, render_pdf_from_html, sha1_bytes, compute_student_annual, build_standard_competition_ranks
 from grading.services import compute_student_term_preview, compute_class_term_preview
 
 class StudentTermPreviewView(APIView):
@@ -115,3 +116,86 @@ class ReportVerifyPage(TemplateView):
             "pdf_sha1": token.pdf_sha1,
         }
         return self.render_to_response(ctx)
+
+class StudentAnnualPDFView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        enrollment_id = request.GET.get("enrollment")
+        if not enrollment_id:
+            return Response({"detail":"enrollment is required"}, status=400)
+
+        # payload pour l'élève
+        payload = compute_student_annual(int(enrollment_id))
+
+        # ⚖️ construire les rangs de la classe sans recursion
+        classroom_id = payload["classroom"]["id"]
+        enrollments = Enrollment.objects.filter(classroom_id=classroom_id, active=True).select_related("student")
+        # on calcule les moyennes annuelles pour chaque élève (sans rang), en une seule passe
+        avg_map = {}
+        cache_payload = {}  # évite de recalculer 2x pour l'élève courant si on veut
+        for e in enrollments:
+            p = compute_student_annual(e.id) if e.id != int(enrollment_id) else payload
+            cache_payload[e.id] = p
+            avg_map[e.id] = p["totals"]["average"]
+
+        rank_map, class_avg = build_standard_competition_ranks(avg_map)
+        payload["class_stats"] = {
+            "rank": rank_map.get(int(enrollment_id)),
+            "count": len(avg_map),
+            "class_avg": class_avg
+        }
+
+        # rendu PDF
+        html = render_to_string("reports/report_card_annual.html", {"p": payload, "verify_url": request.build_absolute_uri("/reports/verify-annual/UNAVAILABLE/")})
+        pdf = render_pdf_from_html(html)
+        filename = f"{payload['student']['matricule']}_{payload['classroom']['name']}_ANNUAL.pdf"
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = f'inline; filename="{filename}"'
+        return resp
+
+class ClassAnnualPDFBatchView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        classroom_id = request.GET.get("classroom")
+        if not classroom_id:
+            return Response({"detail":"classroom is required"}, status=400)
+
+        enrollments = list(Enrollment.objects.filter(classroom_id=classroom_id, active=True).select_related("student","classroom__year"))
+        if not enrollments:
+            return Response({"detail":"No enrollments"}, status=404)
+
+        # 1) construire tous les payloads + avg_map en une passe
+        payloads = {}
+        avg_map = {}
+        for e in enrollments:
+            p = compute_student_annual(e.id)
+            payloads[e.id] = p
+            avg_map[e.id] = p["totals"]["average"]
+
+        # 2) rangs
+        rank_map, class_avg = build_standard_competition_ranks(avg_map)
+
+        # 3) générer le ZIP
+        memzip = io.BytesIO()
+        with zipfile.ZipFile(memzip, "w", zipfile.ZIP_DEFLATED) as zf:
+            for e in enrollments:
+                p = payloads[e.id]
+                p["class_stats"] = {
+                    "rank": rank_map.get(e.id),
+                    "count": len(avg_map),
+                    "class_avg": class_avg
+                }
+                html = render_to_string("reports/report_card_annual.html", {"p": p, "verify_url": request.build_absolute_uri("/reports/verify-annual/UNAVAILABLE/")})
+                pdf = render_pdf_from_html(html)
+                fname = f"{p['student']['matricule']}_{p['classroom']['name']}_ANNUAL.pdf"
+                zf.writestr(fname, pdf)
+
+        memzip.seek(0)
+        resp = HttpResponse(memzip.getvalue(), content_type="application/zip")
+        resp["Content-Disposition"] = f'attachment; filename="class_{classroom_id}_ANNUAL.zip"'
+        return resp
+
+
+

@@ -15,6 +15,14 @@ from grading.models import GradeBand, GradeScale
 from reports.models import ReportToken
 
 TIMES_STACK = '"Times New Roman", Times, serif'
+# Pondération des trimestres (adapter si besoin)
+ANNUAL_TERM_WEIGHTS = {
+    1: 1,  # Term index 1
+    2: 1,  # Term index 2
+    3: 1,  # Term index 3
+}
+ANNUAL_PASS_MARK = 50  # pour la décision de promotion
+
 
 def grade_for(score):
     # score peut arriver en float/Decimal → cast propre en Decimal
@@ -33,6 +41,36 @@ def grade_for(score):
             .order_by("min_mark")
             .first())
     return band.letter if band else ""
+
+def build_standard_competition_ranks(avg_map):
+    """
+    avg_map: dict { enrollment_id: float_avg }
+    return: (rank_map, class_avg)
+       - rank_map: {enrollment_id: rank} avec la règle 1,1,3,4...
+       - class_avg: moyenne de classe arrondie à 2 décimales
+    """
+    if not avg_map:
+        return {}, 0.0
+
+    # fréquences par valeur Decimal (2 décimales)
+    freq = defaultdict(int)
+    dec_map = {}
+    for k, v in avg_map.items():
+        dv = _q2(Decimal(str(v)))
+        dec_map[k] = dv
+        freq[dv] += 1
+
+    uniq = sorted(freq.keys(), reverse=True)
+    rank_by_val = {}
+    current = 1
+    for val in uniq:
+        rank_by_val[val] = current
+        current += freq[val]
+
+    rank_map = {enr_id: rank_by_val[dec_map[enr_id]] for enr_id in dec_map.keys()}
+    class_avg = float(_q2(sum(dec_map.values()) / Decimal(len(dec_map))))
+    return rank_map, class_avg
+
 
 def compute_student_term(enrollment_id: int, term_id: int):
     e = (Enrollment.objects
@@ -288,3 +326,186 @@ def compute_class_term_rank(classroom_id: int, term_id: int):
     class_avg = float(_q2(sum(per_student_avg.values()) / count)) if count else 0.0
 
     return {"count": count, "class_avg": class_avg, "rank_map": rank_map}
+
+def get_year_terms_sorted(year_id: int):
+    return list(Term.objects.filter(year_id=year_id).order_by("index").values("id","index"))
+
+def compute_student_annual(enrollment_id: int):
+    """
+    Calcule le bulletin annuel d'un élève :
+    - lignes matières avec colonnes T1/T2/T3 + Annual + Grade + Weighted
+    - moyenne annuelle pondérée par coef
+    - rang annuel dans la classe
+    """
+    e = (Enrollment.objects
+         .select_related("student","classroom__level","classroom__year")
+         .get(id=enrollment_id))
+    classroom = e.classroom
+    level_code = (classroom.level.code or "").upper()
+    terms = get_year_terms_sorted(classroom.year_id)  # [{'id':..,'index':..}, ...]
+
+    # Matières de la classe
+    cs_list = list(ClassSubject.objects.select_related("subject").filter(classroom=classroom))
+    cs_by_id = {cs.id: cs for cs in cs_list}
+
+    # Panier de l’élève (sélectionnées, stable à l’année car EnrollmentSubject est lié à Enrollment)
+    es_list = list(EnrollmentSubject.objects
+                   .filter(enrollment=e, selected=True, class_subject_id__in=cs_by_id.keys())
+                   .select_related("class_subject__subject"))
+    es_ids = [es.id for es in es_list]
+
+    # Préparer un index assessments/weights par (term, class_subject)
+    assessments_by_tc = defaultdict(list)   # (term_id, cs_id) -> [Assessment]
+    full_weight_by_tc = defaultdict(Decimal)
+
+    ass_qs = Assessment.objects.select_related("atype").filter(
+        term_id__in=[t["id"] for t in terms],
+        class_subject_id__in=cs_by_id.keys()
+    )
+    for a in ass_qs:
+        key = (a.term_id, a.class_subject_id)
+        assessments_by_tc[key].append(a)
+        full_weight_by_tc[key] += Decimal(a.atype.weight)
+
+    # Scores de l’élève pour l’année
+    scores = list(
+        Score.objects.filter(enrollment_subject_id__in=es_ids,
+                             assessment_id__in=[a.id for a in ass_qs])
+             .values("assessment_id","enrollment_subject_id","value")
+    )
+    # index rapide assessment_id -> (term_id, cs_id, weight)
+    a_idx = {}
+    for a in ass_qs:
+        a_idx[a.id] = (a.term_id, a.class_subject_id, Decimal(a.atype.weight))
+
+    # Agrégat par ES et par term : somme(val*poids), somme(poids présents)
+    es_term_num = defaultdict(Decimal)     # (es_id, term_id) -> num
+    es_term_w = defaultdict(Decimal)       # (es_id, term_id) -> w_present
+
+    for s in scores:
+        term_id, cs_id, w = a_idx[s["assessment_id"]]
+        key = (s["enrollment_subject_id"], term_id)
+        es_term_num[key] += Decimal(s["value"]) * w
+        es_term_w[key] += w
+
+    # Lignes matières + totaux
+    lines = []
+    total_weighted = Decimal(0)
+    total_coef = Decimal(0)
+
+    for es in es_list:
+        cs = es.class_subject
+        coef = Decimal(es.coef_override or cs.coefficient)
+
+        term_marks = {}  # index -> mark 0..100 (float/empty)
+        annual_num = Decimal(0)
+        annual_den = Decimal(0)
+
+        for t in terms:
+            term_id = t["id"]; t_idx = t["index"]
+            key = (es.id, term_id)
+            # marque trimestrielle
+            if level_code in ("F5","L6","U6"):
+                # renormaliser sur poids présents
+                denom = es_term_w.get(key, Decimal(0))
+            else:
+                # F1..F4 : sur poids total attendus
+                denom = full_weight_by_tc.get((term_id, cs.id), Decimal(0))
+
+            if denom > 0:
+                mark_t = (es_term_num.get(key, Decimal(0)) / denom)
+                term_marks[t_idx] = float(_q2(mark_t))
+            else:
+                term_marks[t_idx] = 0.0 if level_code not in ("F5","L6","U6") else ""  # F5+: pas de note = vide
+
+            # cumul annuel (pondération par trimestre)
+            w_term = Decimal(ANNUAL_TERM_WEIGHTS.get(t_idx, 1))
+            # si vide en F5+ on ne compte pas ce term
+            if term_marks[t_idx] != "":
+                annual_num += Decimal(str(term_marks[t_idx])) * w_term
+                annual_den += w_term
+
+        # note annuelle matière
+        annual_mark = (annual_num / annual_den) if annual_den > 0 else Decimal(0)
+        weighted = annual_mark * coef
+
+        total_weighted += weighted
+        total_coef += coef
+
+        lines.append({
+            "code": cs.subject.code,
+            "name": cs.subject.name,
+            "coef": float(coef),
+            "t1": term_marks.get(1, ""),
+            "t2": term_marks.get(2, ""),
+            "t3": term_marks.get(3, ""),
+            "annual": float(_q2(annual_mark)),
+            "grade": grade_for(_q2(annual_mark)),
+            "weighted": float(_q2(weighted)),
+        })
+
+    annual_avg = float(_q2((total_weighted / total_coef) if total_coef > 0 else Decimal(0)))
+
+    # Décision de promotion (règle simple)
+    decision = "Promoted" if annual_avg >= ANNUAL_PASS_MARK else "Repeat"
+
+    payload = {
+        "school": {
+            "name": getattr(settings, "SCHOOL_NAME", "Your School"),
+            "address": getattr(settings, "SCHOOL_ADDRESS", ""),
+            "phone": getattr(settings, "SCHOOL_PHONE", ""),
+        },
+        "student": {
+            "matricule": e.student.matricule,
+            "name": f"{e.student.last_name} {e.student.first_name}",
+            "sex": e.student.sex,
+        },
+        "classroom": {
+            "id": classroom.id,
+            "name": classroom.name,
+            "level": classroom.level.code,
+            "year": classroom.year.name,
+        },
+        "lines": lines,
+        "totals": {
+            "coef_sum": float(_q2(total_coef)),
+            "weighted_sum": float(_q2(total_weighted)),
+            "average": annual_avg,
+        },
+        "decision": decision,
+        "attendance": {"absences": "", "lates": ""},
+        "remarks": {"teacher": "", "principal": ""},
+    }
+    return payload
+
+def compute_class_annual_rank(classroom_id: int):
+    """
+    Calcule la moyenne annuelle de chaque élève de la classe (avec les mêmes règles)
+    puis renvoie le rang 'standard competition'.
+    NB: Implémentation simple: on appelle compute_student_annual pour chaque élève.
+        (Optimisable plus tard si besoin.)
+    """
+    enrollments = list(Enrollment.objects.filter(classroom_id=classroom_id, active=True)
+                       .select_related("student","classroom__year"))
+    avgs = {}
+    for e in enrollments:
+        p = compute_student_annual(e.id)  # oui, N appels; assez pour une classe
+        avgs[e.id] = Decimal(str(p["totals"]["average"]))
+
+    # rang standard competition
+    freq = defaultdict(int)
+    for v in avgs.values():
+        freq[v] += 1
+    uniq = sorted(freq.keys(), reverse=True)
+    rank_by_val = {}
+    current = 1
+    for v in uniq:
+        rank_by_val[v] = current
+        current += freq[v]
+    rank_map = {enr_id: rank_by_val[val] for enr_id, val in avgs.items()}
+
+    count = len(avgs)
+    class_avg = float(_q2(sum(avgs.values()) / count)) if count else 0.0
+    return {"count": count, "class_avg": class_avg, "rank_map": rank_map}
+
+
