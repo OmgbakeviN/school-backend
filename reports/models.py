@@ -18,3 +18,16 @@ class ReportToken(models.Model):
     def __str__(self):
         s = self.enrollment.student
         return f"{self.uid} - {s.matricule} - Term {self.term.index}"
+
+class AnnualReportToken(models.Model):
+    uid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name="annual_tokens")
+    year_label = models.CharField(max_length=64)          # ex: "2025/2026"
+    created_at = models.DateTimeField(auto_now_add=True)
+    valid = models.BooleanField(default=True)
+    payload = models.JSONField(default=dict, blank=True)  # snapshot
+    pdf_sha1 = models.CharField(max_length=64, blank=True)
+
+    def __str__(self):
+        s = self.enrollment.student
+        return f"{self.uid} - {s.matricule} - {self.year_label}"

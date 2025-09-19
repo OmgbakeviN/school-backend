@@ -1,5 +1,8 @@
 from django.urls import path
-from .views import StudentTermPreviewView, ClassTermPreviewView, StudentPDFView, ClassPDFBatchView, ReportVerifyPage, StudentAnnualPDFView, ClassAnnualPDFBatchView
+from .views import (
+    StudentTermPreviewView, ClassTermPreviewView, StudentPDFView, ClassPDFBatchView, ReportVerifyPage,
+    StudentAnnualPDFView, ClassAnnualPDFBatchView, AnnualReportVerifyPage
+)
 
 urlpatterns = [
     path("reports/preview/student", StudentTermPreviewView.as_view()),
@@ -9,4 +12,5 @@ urlpatterns = [
     path("reports/verify/<uuid:uid>/", ReportVerifyPage.as_view(), name="report-verify"),
     path("api/reports/pdf/annual/student/", StudentAnnualPDFView.as_view(), name="report-pdf-student-annual"),
     path("api/reports/pdf/annual/class/", ClassAnnualPDFBatchView.as_view(), name="report-pdf-class-annual"),
+    path("reports/verify-annual/<uuid:uid>/", AnnualReportVerifyPage.as_view(), name="report-verify-annual"),
 ]

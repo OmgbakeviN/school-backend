@@ -211,6 +211,7 @@ def build_pdf_html(payload: dict, verify_url: str) -> str:
     })
 
 def sha1_bytes(b: bytes) -> str:
+    import hashlib
     return hashlib.sha1(b).hexdigest()
 
 def _q2(x: Decimal) -> Decimal:
@@ -508,4 +509,10 @@ def compute_class_annual_rank(classroom_id: int):
     class_avg = float(_q2(sum(avgs.values()) / count)) if count else 0.0
     return {"count": count, "class_avg": class_avg, "rank_map": rank_map}
 
-
+def build_pdf_html_annual(payload: dict, verify_url: str) -> str:
+    qr_b64 = make_qr_png_b64(verify_url)
+    return render_to_string("reports/report_card_annual.html", {
+        "p": payload,
+        "verify_url": verify_url,
+        "qr_b64": qr_b64,
+    })
