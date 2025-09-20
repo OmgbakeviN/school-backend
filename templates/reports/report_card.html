@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 12pt; }
+  h1, h2 { margin: 0; }
+  .header { text-align: center; margin-bottom: 12px; }
+  .school { font-weight: bold; font-size: 16pt; }
+  .meta { font-size: 10pt; color: #555; }
+  .line { margin: 2px 0; }
+  .grid { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .grid th, .grid td { border: 1px solid #333; padding: 4px 6px; }
+  .grid th { background: #f1f1f1; }
+  .right { text-align: right; }
+  .center { text-align: center; }
+  .qrbox { float: right; text-align: center; }
+  .signs { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .sign { border-top: 1px solid #333; padding-top: 4px; text-align: center; }
+  .small { font-size: 10pt; color: #555; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="school">{{ p.school.name }}</div>
+    <div class="meta">{{ p.school.address }} {% if p.school.phone %} • {{ p.school.phone }}{% endif %}</div>
+    <h2>Report Card — Term {{ p.term.index }} ({{ p.classroom.year }})</h2>
+  </div>
+
+  <div>
+    <div class="line"><b>Student:</b> {{ p.student.name }} ({{ p.student.matricule }}) — {{ p.student.sex }}</div>
+    <div class="line"><b>Class:</b> {{ p.classroom.name }} — <b>Level:</b> {{ p.classroom.level }}</div>
+    <div class="line"><b>Position:</b> {{ p.class_stats.rank }} / {{ p.class_stats.count }}
+      — <b>Class Avg:</b> {{ p.class_stats.class_avg }}</div> <!-- AJOUT -->
+  </div>
+
+  <div class="qrbox">
+    <img src="data:image/png;base64,{{ qr_b64 }}" width="100" height="100"><br>
+    <span class="small">Verify: {{ verify_url }}</span>
+  </div>
+
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Subject</th>
+        <th class="center">Coef</th>
+        <th class="center">CA1</th>
+        <th class="center">CA2</th>
+        <th class="center">Term Mark</th>
+        <th class="center">Grade</th>
+        <th class="center">Weighted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in p.lines %}
+      <tr>
+        <td>{{ line.code }}</td>
+        <td>{{ line.name }}</td>
+        <td class="center">{{ line.coef }}</td>
+        <td class="center">{{ line.ca1 }}</td>
+        <td class="center">{{ line.ca2 }}</td>
+        <td class="center">{{ line.mark }}</td>
+        <td class="center">{{ line.grade }}</td>
+        <td class="center">{{ line.weighted }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="2" class="right">Totals</th>
+        <th class="center">{{ p.totals.coef_sum }}</th>
+        <th colspan="3"></th>
+        <th></th>
+        <th class="center">{{ p.totals.weighted_sum }}</th>
+      </tr>
+      <tr>
+        <th colspan="7" class="right">Average</th>
+        <th class="center">{{ p.totals.average }}</th>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div style="margin-top:10px;">
+    <div><b>Attendance:</b> Absences: {{ p.attendance.absences }} • Lates: {{ p.attendance.lates }}</div>
+    <div><b>Remarks (Teacher):</b> {{ p.remarks.teacher }}</div>
+    <div><b>Remarks (Principal):</b> {{ p.remarks.principal }}</div>
+  </div>
+
+  <div class="signs">
+    <div class="sign">Class Teacher Signature / Date</div>
+    <div class="sign">Principal Signature / Date</div>
+  </div>
+</body>
+</html>
