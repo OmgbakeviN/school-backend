@@ -13,6 +13,7 @@ from .serializers import (
 from .permissions import IsTeacherOrAdminWrite
 from .utils import teacher_can_edit
 from subjects.models import ClassSubject
+from portals.models import TeacherAssignment
 
 class AssessmentTypeViewSet(viewsets.ModelViewSet):
     queryset = AssessmentType.objects.all()
@@ -92,3 +93,5 @@ class ScoreViewSet(viewsets.ModelViewSet):
 
         result = ser.save()
         return Response(result, status=status.HTTP_200_OK)
+
+
